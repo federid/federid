@@ -1,0 +1,266 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    federid.io/system: "true"
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+  name: federid
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-admin
+  namespace: federid
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-manager-role
+  namespace: federid
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-manager-rolebinding
+  namespace: federid
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: federid-webhook-manager-role
+subjects:
+- kind: ServiceAccount
+  name: federid-webhook-admin
+  namespace: federid
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: federid-webhook-manager-role
+subjects:
+- kind: ServiceAccount
+  name: federid-webhook-admin
+  namespace: federid
+---
+apiVersion: v1
+data:
+  SPIFFE_HELPER_SIDECAR_IMAGE: federid/spiffe-helper:latest
+kind: ConfigMap
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-config
+  namespace: federid
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-server-cert
+  namespace: federid
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-service
+  namespace: federid
+spec:
+  ports:
+  - port: 443
+    targetPort: 9443
+  selector:
+    federid.io/system: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook
+  namespace: federid
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      federid.io/system: "true"
+  template:
+    metadata:
+      labels:
+        federid.io/system: "true"
+    spec:
+      containers:
+      - args:
+        - --log-level=debug
+        command:
+        - /manager
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: SPIFFE_HELPER_SIDECAR_IMAGE
+          value: 'federid/spiffe-helper:latest'
+        envFrom:
+        - configMapRef:
+            name: federid-webhook-config
+        image: federid/webhook:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 6
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        - containerPort: 8095
+          name: metrics
+          protocol: TCP
+        - containerPort: 9440
+          name: healthz
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: healthz
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 100m
+            memory: 30Mi
+          requests:
+            cpu: 100m
+            memory: 20Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 65532
+          runAsNonRoot: true
+          runAsUser: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - mountPath: /certs
+          name: cert
+          readOnly: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-cluster-critical
+      serviceAccountName: federid-webhook-admin
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: federid-webhook-server-cert
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook
+  namespace: federid
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      federid.io/system: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  labels:
+    federid.io/system: "true"
+  name: federid-webhook-mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: federid-webhook-service
+      namespace: federid
+      path: /mutate-v1-pod
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: mutation.federid.io
+  objectSelector:
+    matchLabels:
+      federid.io/use: "true"
+  reinvocationPolicy: IfNeeded
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    resources:
+    - pods
+  sideEffects: None

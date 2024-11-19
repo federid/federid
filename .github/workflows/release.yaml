@@ -1,0 +1,103 @@
+name: Release Build
+on:
+  push:
+    tags:
+      - 'v[0-9].[0-9]+.[0-9]+'
+
+jobs:
+  push_to_registry:
+    name: Push Docker images to Docker Hub
+    env:
+      FEDERID_VERSION: ${{ github.ref_name }}
+      FEDERID_WEBHOOK_REGISTRY: docker.io
+      FEDERID_WEBHOOK_IMAGE_NAME: federid/webhook 
+      FEDERID_SPIFFE_HELPER_REGISTRY: docker.io
+      FEDERID_SPIFFE_HELPER_IMAGE_NAME: federid/spiffe-helper 
+      FEDERID_TESTER_REGISTRY: docker.io
+      FEDERID_TESTER_IMAGE_NAME: federid/tester 
+    runs-on: ubuntu-22.04
+    permissions:
+      packages: write
+      contents: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Build artifacts
+        run: make FEDERID_VERSION=$FEDERID_VERSION
+
+      # Create Release
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF#refs/tags/}" ./bin/federid-webhook --title "${GITHUB_REF#refs/tags/}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.FEDERID_DOCKER_USERNAME }}
+          password: ${{ secrets.FEDERID_DOCKER_PASSWORD }}
+
+      # federid-webhook steps
+      - name: Extract federid-webhook metadata
+        id: meta-federid-webhook
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.FEDERID_WEBHOOK_IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+          labels: |
+            org.opencontainers.image.title=${{ env.FEDERID_WEBHOOK_IMAGE_NAME }}
+            org.opencontainers.image.version=${{ env.FEDERID_VERSION }}
+            org.opencontainers.image.description=Your webhook image description
+
+      - name: Build and push federid-webhook Docker image
+        id: push-federid-webhook
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile  # Update if necessary
+          push: true
+          tags: ${{ steps.meta-federid-webhook.outputs.tags }}
+          labels: ${{ steps.meta-federid-webhook.outputs.labels }}
+
+      - name: Generate federid-webhook artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.FEDERID_WEBHOOK_REGISTRY }}/${{ env.FEDERID_WEBHOOK_IMAGE_NAME }}
+          subject-digest: ${{ steps.push-federid-webhook.outputs.digest }}
+          push-to-registry: true
+
+      # federid-spiffe-helper steps
+      - name: Extract federid-spiffe-helper metadata
+        id: meta-federid-spiffe-helper
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.FEDERID_SPIFFE_HELPER_IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+          labels: |
+            org.opencontainers.image.title=${{ env.FEDERID_SPIFFE_HELPER_IMAGE_NAME }}
+            org.opencontainers.image.version=${{ env.FEDERID_VERSION }}
+            org.opencontainers.image.description=Your spiffe-helper image description
+
+      - name: Build and push federid-spiffe-helper Docker image
+        id: push-federid-spiffe-helper
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./docker/spiffe-helper/Dockerfile  # Verify this path
+          push: true
+          tags: ${{ steps.meta-federid-spiffe-helper.outputs.tags }}
+          labels: ${{ steps.meta-federid-spiffe-helper.outputs.labels }}
+
+      - name: Generate federid-spiffe-helper artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.FEDERID_SPIFFE_HELPER_REGISTRY }}/${{ env.FEDERID_SPIFFE_HELPER_IMAGE_NAME }}
+          subject-digest: ${{ steps.push-federid-spiffe-helper.outputs.digest }}
+          push-to-registry: true
