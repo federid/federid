@@ -61,6 +61,42 @@ kubectl get pods -n federid
 
 You should see the federid-webhook pod running.
 
+## Enable FederID in Pods
+
+To enable FederID features such as JWT token injection and environment variable configuration, you need to label the relevant pods with `federid.io/use: "true"`. 
+
+This label signals the federid webhook to process the pod and inject the necessary resources.
+
+### Example: Labeling a Pod in a Deployment
+Below is an example of a Kubernetes Deployment with the required label applied:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: federid-test
+  namespace: default
+  labels:
+    app: federid-test
+spec:
+  selector:
+    matchLabels:
+      app: federid-test
+  template:
+    metadata:
+      labels:
+        app: federid-test
+        federid.io/use: "true" # Label required to enable FederID
+    spec:
+      serviceAccountName: federid-aws # Ensure this account has appropriate permissions
+      containers:
+        - name: client
+          image: federid/tester:latest
+          command: ["sleep"]
+          args: ["1000000000"]
+```
+
+
 ## Service Account Annotations
 Federid uses Kubernetes annotations to define which authentication mechanism to use for a given ServiceAccount. Users can annotate their ServiceAccount to either use Kubernetes Service Account Tokens or SPIFFE/SPIRE Tokens.
 
@@ -78,6 +114,10 @@ metadata:
     aws.federid.io/role-arn: 'arn:aws:iam::111111111111:role/MyFederidRole'  # Required
 ```
 
+Environment variables that will be injected into all containers of the Pod:
+- `AWS_ROLE` = `arn:aws:iam::111111111111:role/MyFederidRole` 
+- `AWS_WEB_IDENTITY_TOKEN_FILE` = JWT file path injected by Federid (defaults to: `/run/secrets/federid.io/token`)
+
 #### Service Account with Kubernetes Service Account Token
 ```yaml
 apiVersion: v1
@@ -91,6 +131,21 @@ metadata:
     aws.federid.io/use: 'true'  # Enable AWS provider
     aws.federid.io/role-arn: 'arn:aws:iam::111111111111:role/MyFederidRole'  # Required
 ```
+
+Environment variables that will be injected into all containers of the Pod:
+- `AWS_ROLE` = `arn:aws:iam::111111111111:role/MyFederidRole`
+- `AWS_WEB_IDENTITY_TOKEN_FILE` = JWT file path injected by Federid (defaults to: `/run/secrets/federid.io/token`)
+
+#### Test AWS authentication
+
+AWS automatically detects the injected environment variables as part of its SDK. Therefore, it is not necessary to login. 
+
+If the `AWS_ROLE` has S3 list permissions, you can try:
+
+```bash
+aws s3 ls
+```
+
 ### Azure Examples
 #### Service Account with SPIFFE/SPIRE Token
 ```yaml
@@ -107,6 +162,12 @@ metadata:
     azure.federid.io/client-id: 'ffffffff-8f34-46a7-b80e-aaaaaaaaaaaa'  # Required
 ```
 
+Environment variables that will be injected into all containers of the Pod:
+- `AZURE_TENANT_ID` = `ffffffff-acaf-40f9-b944-aaaaaaaaaaaa`
+- `AZURE_CLIENT_ID` = `ffffffff-8f34-46a7-b80e-aaaaaaaaaaaa`
+- `AZURE_AUTHORITY_HOST` = `https://login.microsoftonline.com`
+- `AZURE_FEDERATED_TOKEN_FILE` = JWT file path injected by Federid (defaults to: `/run/secrets/federid.io/token`)
+
 #### Service Account with Kubernetes Service Account Token
 ```yaml
 apiVersion: v1
@@ -123,6 +184,18 @@ metadata:
     azure.federid.io/client-id: 'ffffffff-8f34-46a7-b80e-aaaaaaaaaaaa'  # Required
 ```
 
+Environment variables that will be injected into all containers of the Pod:
+- `AZURE_TENANT_ID` = `ffffffff-acaf-40f9-b944-aaaaaaaaaaaa`
+- `AZURE_CLIENT_ID` = `ffffffff-8f34-46a7-b80e-aaaaaaaaaaaa`
+- `AZURE_AUTHORITY_HOST` = `https://login.microsoftonline.com`
+- `AZURE_FEDERATED_TOKEN_FILE` = JWT file path injected by Federid (defaults to: `/run/secrets/federid.io/token`)
+
+#### Test Azure authentication
+
+```bash
+az login --federated-token "$(cat $AZURE_FEDERATED_TOKEN_FILE)" --service-principal -u $AZURE_CLIENT_ID -t $AZURE_TENANT_ID
+```
+
 ### GCP Examples
 #### Service Account with SPIFFE/SPIRE Token
 ```yaml
@@ -137,6 +210,14 @@ metadata:
     gcp.federid.io/service-account: 'sa@project.iam.gserviceaccount.com'  # Required
     gcp.federid.io/audience: 'projects/111111111111/locations/global/workloadIdentityPools/idp-com/providers/sts-idp-com'  # Required
 ```
+
+Environment variables that will be injected into all containers of the Pod:
+- `AZURE_TENANT_ID` = `ffffffff-acaf-40f9-b944-aaaaaaaaaaaa`
+- `AZURE_CLIENT_ID` = `ffffffff-8f34-46a7-b80e-aaaaaaaaaaaa`
+- `AZURE_AUTHORITY_HOST` = `https://login.microsoftonline.com`
+- `AZURE_FEDERATED_TOKEN_FILE` = JWT file path injected by Federid (defaults to: `/run/secrets/federid.io/token`)
+
+
 #### Service Account with Kubernetes Service Account Token
 ```yaml
 apiVersion: v1
@@ -150,6 +231,27 @@ metadata:
     gcp.federid.io/use: 'true'  # Enable GCP provider
     gcp.federid.io/service-account: 'sa@project.iam.gserviceaccount.com'  # Required
     gcp.federid.io/audience: 'projects/111111111111/locations/global/workloadIdentityPools/idp-com/providers/sts-idp-com'  # Required
+```
+
+Environment variables that will be injected into all containers of the Pod:
+- `FEDERID_GCP_SERVICE_ACCOUNT` = `sa@project.iam.gserviceaccount.com`
+- `FEDERID_GCP_AUDIENCE` = `projects/111111111111/locations/global/workloadIdentityPools/idp-com/providers/sts-idp-com`
+- `FEDERID_GCP_TOKEN` = JWT file path injected by Federid (defaults to: `/run/secrets/federid.io/token`)
+
+In the case of GCP, injected environment variables do not belong to the Google SDK.
+
+#### Test GCP authentication
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp_sa.json
+
+gcloud iam workload-identity-pools create-cred-config $FEDERID_GCP_AUDIENCE \
+--service-account=$FEDERID_GCP_SERVICE_ACCOUNT \
+--credential-source-file=$FEDERID_GCP_TOKEN \
+--credential-source-type=text \
+--output-file=$GOOGLE_APPLICATION_CREDENTIALS
+
+gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS
 ```
 
 ## Requirements
