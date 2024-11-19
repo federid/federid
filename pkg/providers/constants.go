@@ -56,16 +56,6 @@ const (
 
 	// AzureAuthorityHostEnvVarDefault specifies the default authority host URL for Azure.
 	AzureAuthorityHostEnvVarDefault = "https://login.microsoftonline.com"
-
-	// TokenFilePathName is the default file name for the Azure identity token.
-	TokenFilePathName = "azure-identity-token"
-
-	// TokenFileMountPath specifies the default mount path for the Azure token file.
-	TokenFileMountPath = "/var/run/secrets/azure/tokens" // #nosec
-
-	// DefaultAudience specifies the default audience for the service account token. This value is consistent
-	// with other token exchange flows in Azure Active Directory (AAD) and does not impact the actual token exchange process.
-	DefaultAudience = "api://AzureADTokenExchange"
 )
 
 // AWS-specific constants and environment variables for workload identity
