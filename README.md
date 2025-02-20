@@ -1,6 +1,9 @@
 # Federid - Federated Workload Identity for Kubernetes
 Federid enables seamless integration of identity providers (Azure, AWS, and GCP) with Kubernetes workloads, supporting two mechanisms for workload authentication: Kubernetes Service Account Tokens or SPIFFE/SPIRE Tokens. Federid allows Kubernetes pods to authenticate and retrieve identity tokens through service account tokens or injected environment variables, streamlining secure interactions with cloud-native services.
 
+This project is part of the Master Thesis [**Kubernetes Workload Identity Federation**](https://openaccess.uoc.edu/handle/10609/152143)  
+by **Emiliano Spinella**, *Universitat Oberta de Catalunya*.
+
 ## Features
 - Service Account Tokens: Automatically injects Kubernetes service account tokens into pods for seamless authentication.
 - SPIFFE/SPIRE Tokens: Option to authenticate via SPIFFE tokens using SPIFFE/SPIRE for secure identity federation.
